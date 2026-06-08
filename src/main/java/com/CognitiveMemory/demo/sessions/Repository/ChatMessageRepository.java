@@ -8,5 +8,7 @@ import java.util.List;
 
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
     List<ChatMessage> findTop50BySessionOrderByCreatedAtDesc(ChatSession session);
+    List<ChatMessage> findBySessionOrderByCreatedAtAsc(ChatSession session);
+    long countBySession(ChatSession session);
 }
 

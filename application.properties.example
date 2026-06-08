@@ -1,0 +1,11 @@
+spring.datasource.url=
+spring.datasource.username=
+spring.datasource.password=
+spring.jpa.hibernate.ddl-auto=update
+spring.data.redis.host=
+spring.data.redis.port=
+jwt.secret=
+jwt.expiration.ms=
+jwt.refresh.expiration.ms=
+python.ai.service.base-url=
+python.ai.service.bearer-token=
