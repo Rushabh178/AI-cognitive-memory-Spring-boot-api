@@ -18,6 +18,11 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/public")
@@ -42,9 +47,39 @@ public class PublicController {
     @Autowired
     private JwtUtil jwtUtil;
 
+    @Autowired
+    private RestClient aiRestClient;
+
     @GetMapping("/health-check")
     public String healthCheck() {
         return "OK";
+    }
+
+    @GetMapping("/ping-ai-service")
+    public ResponseEntity<Map<String, String>> pingAiService() {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> health = aiRestClient.get()
+                    .uri("/health")
+                    .retrieve()
+                    .body(Map.class);
+
+            Map<String, String> response = new LinkedHashMap<>();
+            response.put("springBoot", "ok");
+            response.put("pythonService", "ok");
+            response.put("chromadb",   health != null ? String.valueOf(health.get("chromadb"))   : "unknown");
+            response.put("embeddings", health != null ? String.valueOf(health.get("embeddings")) : "unknown");
+            response.put("graph",      health != null ? String.valueOf(health.get("graph"))      : "unknown");
+            response.put("llm",        health != null ? String.valueOf(health.get("llm"))        : "unknown");
+            return ResponseEntity.ok(response);
+
+        } catch (RestClientException e) {
+            Map<String, String> response = new LinkedHashMap<>();
+            response.put("springBoot", "ok");
+            response.put("pythonService", "unreachable");
+            response.put("error", "Connection refused — is Python service running on port 8000?");
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+        }
     }
 
     @PostMapping("/signup")

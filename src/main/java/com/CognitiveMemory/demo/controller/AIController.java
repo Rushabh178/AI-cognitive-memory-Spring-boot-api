@@ -72,10 +72,13 @@ public class AiController {
             // Step 2: Store user message in memory
             pythonAiGateway.storeMemory(userId, userMsg.getContent(), "user");
             log.info("Step 2 complete: stored user message in memory");
+            String memoryId = userId + "_" + userMsg.getId();
+            pythonAiGateway.processGraph(userId, userMsg.getContent(), memoryId);
 
             // Step 3: Retrieve top 5 relevant memories
             List<String> memories = pythonAiGateway.retrieveMemory(userId, userMsg.getContent(), 5);
             log.info("Step 3 complete: retrieved {} relevant memories", memories.size());
+            // TODO MVP 2: POST /graph/context {userId, query: message, topN: 5} — append graph_context_text to context
 
             // Step 4: Build context string from retrieved memories
             String context = memories.isEmpty() ? "" : String.join("\n", memories);
@@ -100,7 +103,7 @@ public class AiController {
         } catch (RestClientException e) {
             log.error("Chat failed — Python AI service unavailable: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body("AI service is currently unavailable, please try again later");
+                    .body("AI service is currently unavailable. Please ensure the Python service is running on port 8000.");
         } catch (Exception e) {
             log.error("Chat pipeline failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
