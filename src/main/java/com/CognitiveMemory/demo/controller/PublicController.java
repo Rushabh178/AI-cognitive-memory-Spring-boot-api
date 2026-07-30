@@ -22,6 +22,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -53,6 +54,73 @@ public class PublicController {
     @GetMapping("/health-check")
     public String healthCheck() {
         return "OK";
+    }
+
+    /**
+     * Describes the current API contract so a frontend developer can verify
+     * field names without reading Java source. Kept in sync with the real,
+     * non-deprecated endpoints only — POST /ai/chat is intentionally omitted
+     * here since it is @Deprecated in favor of POST /sessions/{sessionId}/message.
+     */
+    @GetMapping("/contract-test")
+    public ResponseEntity<Map<String, Object>> contractTest() {
+        Map<String, Object> login = new LinkedHashMap<>();
+        login.put("method", "POST");
+        login.put("path", "/public/login");
+        login.put("requestFields", List.of("userNameOrEmail", "password"));
+        login.put("responseFields", List.of("accessToken", "refreshToken", "username"));
+
+        Map<String, Object> signup = new LinkedHashMap<>();
+        signup.put("method", "POST");
+        signup.put("path", "/public/signup");
+        signup.put("requestFields", List.of("userName", "email", "password", "firstName", "lastName", "mobileNo"));
+        signup.put("requiredFields", List.of("userName", "email", "password"));
+        signup.put("optionalFields", List.of("firstName", "lastName", "mobileNo"));
+
+        Map<String, Object> refresh = new LinkedHashMap<>();
+        refresh.put("method", "POST");
+        refresh.put("path", "/public/refresh");
+        refresh.put("requestFields", List.of("refreshToken"));
+        refresh.put("responseFields", List.of("accessToken", "refreshToken", "username"));
+
+        Map<String, Object> createSession = new LinkedHashMap<>();
+        createSession.put("method", "POST");
+        createSession.put("path", "/sessions/create");
+        createSession.put("requestFields", List.of("title"));
+        createSession.put("requiredFields", List.of());
+        createSession.put("optionalFields", List.of("title"));
+        createSession.put("defaultValues", Map.of("title", "New chat"));
+        createSession.put("responseFields", List.of("sessionId", "createdAt"));
+
+        Map<String, Object> listSessions = new LinkedHashMap<>();
+        listSessions.put("method", "GET");
+        listSessions.put("path", "/sessions/list");
+        listSessions.put("responseFields", List.of("sessionId", "title", "createdAt", "messageCount"));
+
+        Map<String, Object> sessionHistory = new LinkedHashMap<>();
+        sessionHistory.put("method", "GET");
+        sessionHistory.put("path", "/sessions/{sessionId}/history");
+        sessionHistory.put("responseFields", List.of("id", "role", "content", "createdAt"));
+
+        Map<String, Object> sendMessage = new LinkedHashMap<>();
+        sendMessage.put("method", "POST");
+        sendMessage.put("path", "/sessions/{sessionId}/message");
+        sendMessage.put("requestFields", List.of("message"));
+        sendMessage.put("responseFields", List.of("id", "role", "content", "createdAt"));
+        sendMessage.put("note", "POST /ai/chat also exists but is @Deprecated — use this endpoint instead.");
+
+        Map<String, Object> endpoints = new LinkedHashMap<>();
+        endpoints.put("login", login);
+        endpoints.put("signup", signup);
+        endpoints.put("refresh", refresh);
+        endpoints.put("createSession", createSession);
+        endpoints.put("listSessions", listSessions);
+        endpoints.put("sessionHistory", sessionHistory);
+        endpoints.put("sendMessage", sendMessage);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("endpoints", endpoints);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/ping-ai-service")

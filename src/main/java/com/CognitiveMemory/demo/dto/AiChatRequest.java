@@ -11,5 +11,8 @@ public class AiChatRequest {
     private String userId;
     private String sessionId;
     private String message;
+    // MVP flag so Python can skip its own memory retrieval for context-independent
+    // queries (see MemoryRelevanceUtil). Defaults to true via no-args construction.
+    private boolean useMemory = true;
 }
 

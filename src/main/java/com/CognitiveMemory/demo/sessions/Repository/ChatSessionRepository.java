@@ -9,4 +9,3 @@ import java.util.List;
 public interface ChatSessionRepository extends JpaRepository<ChatSession, Long> {
     List<ChatSession> findByUserOrderByCreatedAtDesc(User user);
 }
-

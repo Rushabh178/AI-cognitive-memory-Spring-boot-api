@@ -131,6 +131,33 @@ public class PythonAiGateway {
         return memories;
     }
 
+    /**
+     * Routes memory writes through the intent-aware Python endpoint, which distinguishes
+     * new facts from duplicates/updates (e.g. task completion) instead of blindly appending —
+     * replaces the old storeMemory + processGraph combo that caused duplicate-memory bugs.
+     */
+    public MemoryIntentResponse processMemoryIntent(String userId, String content) {
+        log.info("Processing memory intent for user={}", userId);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("userId", userId);
+        body.put("text", content);
+
+        try {
+            MemoryIntentResponse resp = aiRestClient.post()
+                    .uri("/memory/process-intent")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(MemoryIntentResponse.class);
+            return resp == null ? new MemoryIntentResponse("created", null) : resp;
+        } catch (HttpClientErrorException ex) {
+            log.error("DEBUG Python /memory/process-intent returned HTTP {} — Python error body: {}",
+                    ex.getStatusCode().value(), ex.getResponseBodyAsString());
+            throw ex;
+        }
+    }
+
     public void processGraph(String userId, String text, String memoryId) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("userId", userId);
