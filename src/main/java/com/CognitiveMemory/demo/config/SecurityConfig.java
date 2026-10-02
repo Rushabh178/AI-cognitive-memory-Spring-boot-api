@@ -5,6 +5,8 @@ import com.CognitiveMemory.demo.filter.RateLimitingFilter;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -58,6 +60,14 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/public/**").permitAll()
                         .anyRequest().authenticated()
+                )
+
+                // Unauthenticated (no token at all) -> 401, not Spring's default 403. The
+                // frontend's interceptor treats 401 as "refresh or send to login"; a 403 left
+                // the page broken (e.g. after logging out in another tab). Invalid/expired
+                // tokens are answered 401 directly by JwtFilter.
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                 )
 
                 // Rate limiter FIRST

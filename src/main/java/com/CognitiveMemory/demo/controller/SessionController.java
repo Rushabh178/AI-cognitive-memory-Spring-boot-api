@@ -10,15 +10,19 @@ import com.CognitiveMemory.demo.sessions.Repository.ChatSessionRepository;
 import com.CognitiveMemory.demo.sessions.entity.ChatMessage;
 import com.CognitiveMemory.demo.sessions.entity.ChatSession;
 import com.CognitiveMemory.demo.sessions.service.CurrentUserService;
+import com.CognitiveMemory.demo.utils.HistoryQuestionUtil;
 import com.CognitiveMemory.demo.utils.MemoryRelevanceUtil;
 import com.CognitiveMemory.demo.utils.MemoryWorthinessUtil;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -117,6 +121,17 @@ public class SessionController {
             ChatSession session = sessionOpt.get();
             String userId = String.valueOf(user.getId());
 
+            // Step 0: Snapshot the CURRENT session's prior turns BEFORE saving this new
+            // message, so it naturally excludes the message we're about to save (no
+            // off-by-one filtering needed). findTop10...Desc returns newest-first; reverse
+            // to chronological order since that's the order real conversation turns need
+            // to appear in the LLM's messages array.
+            List<ChatMessage> priorMessages = messageRepository.findTop10BySessionOrderByCreatedAtDesc(session);
+            List<Map<String, String>> sessionHistory = priorMessages.stream()
+                    .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
+                    .map(m -> Map.of("role", m.getRole(), "content", m.getContent()))
+                    .collect(Collectors.toList());
+
             // Step 1: Save user message
             ChatMessage userMsg = messageRepository.save(ChatMessage.builder()
                     .session(session)
@@ -134,14 +149,56 @@ public class SessionController {
                     ? pythonAiGateway.retrieveMemory(userId, userMsg.getContent(), 5)
                     : List.of();
 
-            // Step 3: Build context string, excluding near-duplicates of the current message
-            List<String> filteredMemories = MemoryWorthinessUtil.filterNearDuplicates(userMsg.getContent(), memories);
-            String context = String.join("\n", filteredMemories);
-            log.info("Context built for session={} ({} chars, {} of {} memories kept)",
-                    session.getId(), context.length(), filteredMemories.size(), memories.size());
+            // Step 2b: Graph relationship context and the rolling summary (Task 1) — both
+            // are supplementary long-term-memory layers, same as ChromaDB memories above.
+            // Both gateway methods already swallow their own failures and return "" so a
+            // down Python graph/summary path never breaks chat.
+            String graphContext = memoryRelevant
+                    ? pythonAiGateway.getGraphContext(userId, userMsg.getContent(), 5)
+                    : "";
+            String summary = pythonAiGateway.getLatestSummary(userId);
 
-            // Step 4: Call the AI with message + context
-            String answer = pythonAiGateway.sendToAi(userId, userMsg.getContent(), context);
+            // Step 2c: Revision history, only for history-flavoured messages ("who did I use to
+            // like before that?"). The graph context and vector retrieval above are current-state
+            // only, so without this a replaced fact is invisible to the model. Bounded on the
+            // Python side (at most 5 changed facts, scoped to the query's domain). Not gated on
+            // memoryRelevant: a history question is itself the signal. Returns "" on failure.
+            boolean historyQuestion = HistoryQuestionUtil.isHistoryQuestion(userMsg.getContent());
+            String history = historyQuestion
+                    ? pythonAiGateway.getGraphHistory(userId, userMsg.getContent())
+                    : "";
+
+            // Step 3: Build the combined LONG-TERM context string, excluding near-duplicates
+            // of the current message. Each source gets its own labeled section so the LLM
+            // (and anyone reading the logs) can tell them apart — priority-instruction
+            // wording that ties this to the current session lives in ai_service.py's system
+            // prompt, not here; this is just assembly.
+            List<String> filteredMemories = MemoryWorthinessUtil.filterNearDuplicates(userMsg.getContent(), memories);
+            StringBuilder contextBuilder = new StringBuilder();
+            if (!filteredMemories.isEmpty()) {
+                contextBuilder.append("Related past memories:\n")
+                        .append(String.join("\n", filteredMemories)).append("\n\n");
+            }
+            if (!graphContext.isBlank()) {
+                contextBuilder.append(graphContext).append("\n\n");
+            }
+            if (!history.isBlank()) {
+                contextBuilder.append("Historical context (previous values the user has since replaced — ")
+                        .append("NOT current; use only to answer questions about the past):\n")
+                        .append(history).append("\n\n");
+            }
+            if (!summary.isBlank()) {
+                contextBuilder.append("User summary (periodically generated):\n")
+                        .append(summary).append("\n\n");
+            }
+            String context = contextBuilder.toString().trim();
+            log.info("Context built for session={} ({} chars: {} memories, graph={}, history={} (question={}), summary={}), sessionHistory={} turns",
+                    session.getId(), context.length(), filteredMemories.size(),
+                    !graphContext.isBlank(), !history.isBlank(), historyQuestion,
+                    !summary.isBlank(), sessionHistory.size());
+
+            // Step 4: Call the AI with message + long-term context + current-session history
+            String answer = pythonAiGateway.sendToAi(userId, userMsg.getContent(), context, sessionHistory);
 
             // Step 5: Store the user message as memory now that the response has been
             // generated, so it becomes context for FUTURE conversations only — and only
@@ -251,6 +308,13 @@ public class SessionController {
         }
     }
 
+    /**
+     * Messages and the session are deleted in ONE transaction, so a failure part-way can't
+     * leave a session with its messages already gone. The exception is caught to return a
+     * clean 500, and a caught exception doesn't trigger rollback on its own — so the catch
+     * marks the transaction rollback-only explicitly.
+     */
+    @Transactional
     @DeleteMapping("/{sessionId}")
     public ResponseEntity<?> deleteSession(@PathVariable Long sessionId) {
         try {
@@ -264,6 +328,7 @@ public class SessionController {
             sessionRepository.delete(session);             // then the session itself
             return ResponseEntity.ok().build();
         } catch (Exception e) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             log.error("Delete session failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to delete session");
         }

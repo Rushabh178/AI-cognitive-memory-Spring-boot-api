@@ -1,6 +1,7 @@
 package com.CognitiveMemory.demo.utils;
 
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -11,6 +12,27 @@ import java.util.stream.Collectors;
  * SessionController so both pipelines apply the same storage rules.
  */
 public final class MemoryWorthinessUtil {
+
+    /**
+     * First-person words that mark a message as being about the user. Word-boundary
+     * matching (\b), not space-padded substrings, so the word is found at the start of
+     * the sentence ("My favorite..."), at the end, and next to punctuation ("my,",
+     * "I."). CASE_INSENSITIVE handles capitalisation. \bi\b also covers contractions
+     * ("I'm", "I've", "I'd") because an apostrophe is a non-word character.
+     */
+    private static final Pattern PERSONAL_PRONOUN = Pattern.compile(
+            "\\b(i|my|mine|we|our)\\b",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    /**
+     * Narrower personal signal that overrides the generic-knowledge-prefix rule, e.g.
+     * "What is my blood type" or "Explain why I feel tired".
+     */
+    private static final Pattern GENERIC_PREFIX_PERSONAL_OVERRIDE = Pattern.compile(
+            "\\b(my|i\\s+am|i['’]m|i\\s+have|i['’]ve|i\\s+feel)\\b",
+            Pattern.CASE_INSENSITIVE
+    );
 
     private MemoryWorthinessUtil() {
     }
@@ -31,9 +53,7 @@ public final class MemoryWorthinessUtil {
 
         // Pure questions rarely contain personal facts
         // Exception: "I have a question about my health" contains "my" — personal context present
-        if (lower.endsWith("?") && !lower.contains(" my ")
-                && !lower.contains(" i ")
-                && !lower.startsWith("i ")) {
+        if (lower.endsWith("?") && !PERSONAL_PRONOUN.matcher(lower).find()) {
             return false;
         }
 
@@ -45,10 +65,7 @@ public final class MemoryWorthinessUtil {
         };
         for (String prefix : genericPrefixes) {
             if (lower.startsWith(prefix)
-                    && !lower.contains(" my ")
-                    && !lower.contains(" i am")
-                    && !lower.contains(" i have")
-                    && !lower.contains(" i feel")) {
+                    && !GENERIC_PREFIX_PERSONAL_OVERRIDE.matcher(lower).find()) {
                 return false;
             }
         }
@@ -67,24 +84,8 @@ public final class MemoryWorthinessUtil {
             }
         }
 
-        // Personal content signals — store if these present
-        String[] personalSignals = {
-                " i ", " i'm ", " i am ", " i have ",
-                " i feel ", " i was ", " i went ",
-                " i got ", " i need ", " my ", " mine ",
-                " we ", " our "
-        };
-        boolean hasPersonalContent = false;
-        for (String signal : personalSignals) {
-            if (lower.contains(signal)
-                    || lower.startsWith("i ")) {
-                hasPersonalContent = true;
-                break;
-            }
-        }
-
-        // Default: if personal content present → store; otherwise don't
-        return hasPersonalContent;
+        // Personal content signals — store if present; otherwise don't
+        return PERSONAL_PRONOUN.matcher(lower).find();
     }
 
     /**
